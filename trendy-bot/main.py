@@ -46,10 +46,38 @@ UNSPLASH_KEYWORDS = {
 
 def get_unsplash_query(text: str) -> str:
     text_lower = text.lower()
-    for keyword, query in UNSPLASH_KEYWORDS.items():
-        if keyword in text_lower:
-            return query
-    return "fashion style luxury"
+    # Бренды — ищем точное фото бренда
+    brands = ["gucci", "prada", "chanel", "dior", "louis vuitton", "versace", 
+              "balenciaga", "valentino", "givenchy", "fendi", "burberry", "hermes"]
+    for brand in brands:
+        if brand in text_lower:
+            return f"{brand} fashion runway"
+    # Темы вечеринок и балов
+    if any(w in text_lower for w in ["ball", "gala", "gown", "evening", "couture"]):
+        return "elegant gala evening gown dress"
+    # Подиум и показы
+    if any(w in text_lower for w in ["runway", "show", "collection", "fashion week"]):
+        return "fashion runway show model"
+    # Уличный стиль
+    if any(w in text_lower for w in ["street style", "street fashion"]):
+        return "street style fashion outfit"
+    # Украшения
+    if any(w in text_lower for w in ["jewelry", "jewel", "diamond", "necklace"]):
+        return "luxury jewelry diamonds"
+    # Сумки
+    if any(w in text_lower for w in ["bag", "handbag", "purse"]):
+        return "luxury handbag fashion"
+    # Обувь
+    if any(w in text_lower for w in ["shoe", "heel", "boot", "sneaker"]):
+        return "fashion shoes luxury"
+    # Весна/лето
+    if any(w in text_lower for w in ["spring", "summer", "ss2"]):
+        return "spring summer fashion collection"
+    # Осень/зима
+    if any(w in text_lower for w in ["fall", "autumn", "winter", "fw2"]):
+        return "fall winter fashion collection"
+    # По умолчанию
+    return "fashion style luxury editorial"
 
 def load_posted():
     if not Path(POSTED_FILE).exists():
