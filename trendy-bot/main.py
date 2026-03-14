@@ -25,51 +25,52 @@ RSS_FEEDS = [
     "https://www.tatler.ru/feed/rss",
 ]
 
-def extract_image_from_entry(entry) -> str | None:
-    """Извлекаем фото прямо из RSS статьи"""
+def extract_images_from_entry(entry) -> list:
+    """Извлекаем ВСЕ фото из RSS статьи (до 4 штук)"""
+    images = []
+
     # 1. media:content
-    media = entry.get("media_content", [])
-    if media:
-        for m in media:
-            url = m.get("url", "")
-            if url and any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
-                return url
+    for m in entry.get("media_content", []):
+        url = m.get("url", "")
+        if url and any(ext in url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+            if url not in images:
+                images.append(url)
 
     # 2. media:thumbnail
-    thumb = entry.get("media_thumbnail", [])
-    if thumb:
-        url = thumb[0].get("url", "")
-        if url:
-            return url
+    for t in entry.get("media_thumbnail", []):
+        url = t.get("url", "")
+        if url and url not in images:
+            images.append(url)
 
     # 3. enclosures
     for enc in entry.get("enclosures", []):
         if "image" in enc.get("type", ""):
-            return enc.get("url", "")
+            url = enc.get("url", "")
+            if url and url not in images:
+                images.append(url)
 
-    # 4. img тег в content/summary
+    # 4. все img теги в контенте
     content = ""
     if entry.get("content"):
         content = entry["content"][0].get("value", "")
     if not content:
         content = entry.get("summary", "")
 
-    img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', content)
-    if img_match:
-        url = img_match.group(1)
-        if url.startswith("http"):
-            return url
+    for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', content):
+        url = match.group(1)
+        if url.startswith("http") and url not in images:
+            images.append(url)
 
-    return None
+    return images[:4]  # максимум 4 фото
 
 def get_unsplash_query(text: str) -> str:
     text_lower = text.lower()
     brands = ["gucci", "prada", "chanel", "dior", "louis vuitton", "versace",
               "balenciaga", "valentino", "givenchy", "fendi", "burberry", "hermes",
-              "saint laurent", "celine", "bottega", "loewe", "jacquemus"]
+              "saint laurent", "celine", "bottega", "loewe", "jacquemus", "miu miu"]
     for brand in brands:
         if brand in text_lower:
-            return f"{brand} fashion runway"
+            return f"{brand} fashion collection"
     if any(w in text_lower for w in ["ball", "gala", "gown", "evening", "couture"]):
         return "elegant gala evening gown dress"
     if any(w in text_lower for w in ["runway", "show", "collection", "fashion week"]):
@@ -80,14 +81,14 @@ def get_unsplash_query(text: str) -> str:
         return "luxury jewelry diamonds"
     if any(w in text_lower for w in ["bag", "handbag", "purse"]):
         return "luxury handbag fashion"
-    if any(w in text_lower for w in ["shoe", "heel", "boot", "sneaker"]):
+    if any(w in text_lower for w in ["shoe", "heel", "boot"]):
         return "fashion shoes luxury"
-    if any(w in text_lower for w in ["spring", "summer", "ss2"]):
+    if any(w in text_lower for w in ["spring", "summer"]):
         return "spring summer fashion collection"
-    if any(w in text_lower for w in ["fall", "autumn", "winter", "fw2"]):
+    if any(w in text_lower for w in ["fall", "autumn", "winter"]):
         return "fall winter fashion collection"
     if any(w in text_lower for w in ["beauty", "makeup", "skincare"]):
-        return "beauty makeup luxury cosmetics"
+        return "beauty makeup luxury"
     return "fashion style luxury editorial"
 
 def load_posted():
@@ -109,40 +110,44 @@ async def fetch_rss_items() -> list:
     for url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
+            source_name = feed.feed.get("title", url)
             for entry in feed.entries[:10]:
                 item_id = get_item_id(entry)
                 if item_id not in posted:
-                    image_url = extract_image_from_entry(entry)
+                    images = extract_images_from_entry(entry)
                     items.append({
                         "id": item_id,
                         "title": entry.get("title", ""),
                         "summary": entry.get("summary", entry.get("description", ""))[:1000],
                         "link": entry.get("link", ""),
-                        "source": feed.feed.get("title", url),
-                        "image_url": image_url,
+                        "source": source_name,
+                        "images": images,
                     })
         except Exception as e:
             print(f"[rss] error {url}: {e}")
     return items
 
 async def generate_post(item: dict) -> str | None:
-    prompt = f"""Ты — редактор топового модного Telegram канала "Тренды не для всех" для русскоязычной аудитории.
+    prompt = f"""Ты — редактор топового модного Telegram канала "Тренды не для всех".
 
-Вот свежая новость из издания {item['source']}:
+Свежая новость из {item['source']}:
 Заголовок: {item['title']}
 Описание: {item['summary']}
 
-Напиши пост на русском языке. Требования:
-- 400-700 символов — коротко и по делу
-- Первое предложение — самый яркий факт или деталь, сразу цепляй
-- Упомяни бренд/дизайнера/тренд конкретно и с уважением
-- Тон: как умная подруга которая разбирается в моде — живо, с характером, без пафоса
-- Добавь одну конкретную деталь которая делает это особенным
-- Заверши коротким личным мнением или вопросом к читателям
-- Используй 1-2 эмодзи уместно
-- Никаких клише типа "в мире моды", "модные эксперты считают"
+Напиши пост на русском языке строго по этой структуре:
 
-Верни только текст поста, без заголовка и без хэштегов."""
+1. ПЕРВАЯ СТРОКА — самый яркий факт, цепляющий, без воды (1 предложение)
+2. СУТЬ — 2-3 предложения о том что произошло, конкретно и интересно
+3. ПРАКТИКА — 1-2 предложения: как этот тренд/образ применить в реальной жизни, что можно повторить
+4. ВОПРОС или МНЕНИЕ — короткое, вовлекающее
+
+Требования:
+- Всего 400-600 символов
+- Живой язык, как умная подруга которая разбирается в моде
+- 1-2 эмодзи уместно
+- Без хэштегов, без клише
+
+Верни только текст поста."""
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -184,32 +189,40 @@ async def get_unsplash_image(query: str) -> str | None:
         print(f"[unsplash] error: {e}")
         return None
 
-async def send_telegram(text: str, image_url: str = None):
+async def send_telegram_album(caption: str, images: list):
+    """Отправляем альбом из нескольких фото"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL:
         return
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            if image_url:
+        async with httpx.AsyncClient(timeout=20) as client:
+            if len(images) >= 2:
+                media = []
+                for i, url in enumerate(images[:4]):
+                    item = {"type": "photo", "media": url}
+                    if i == 0:
+                        item["caption"] = caption
+                        item["parse_mode"] = "HTML"
+                    media.append(item)
+                resp = await client.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMediaGroup",
+                    json={"chat_id": TELEGRAM_CHANNEL, "media": media}
+                )
+                if resp.json().get("ok"):
+                    return
+            # одно фото или ошибка альбома
+            if images:
                 resp = await client.post(
                     f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
-                    json={
-                        "chat_id": TELEGRAM_CHANNEL,
-                        "photo": image_url,
-                        "caption": text,
-                        "parse_mode": "HTML"
-                    }
+                    json={"chat_id": TELEGRAM_CHANNEL, "photo": images[0],
+                          "caption": caption, "parse_mode": "HTML"}
                 )
-                # если фото не загрузилось — шлём без фото
-                if resp.json().get("ok") is False:
-                    await client.post(
-                        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                        json={"chat_id": TELEGRAM_CHANNEL, "text": text, "parse_mode": "HTML"}
-                    )
-            else:
-                await client.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                    json={"chat_id": TELEGRAM_CHANNEL, "text": text, "parse_mode": "HTML"}
-                )
+                if resp.json().get("ok"):
+                    return
+            # совсем без фото
+            await client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={"chat_id": TELEGRAM_CHANNEL, "text": caption, "parse_mode": "HTML"}
+            )
     except Exception as e:
         print(f"[telegram] error: {e}")
 
@@ -246,21 +259,27 @@ async def run():
 
     item = items[0]
     print(f"Processing: {item['title']}")
-    print(f"RSS image: {item.get('image_url', 'none')}")
+    print(f"RSS images found: {len(item['images'])}")
 
     post_text = await generate_post(item)
     if not post_text:
         print("Failed to generate post")
         return
 
-    # Приоритет: фото из RSS → Unsplash как запасной
-    image_url = item.get("image_url")
-    if not image_url:
-        print("No RSS image, trying Unsplash...")
-        query = get_unsplash_query(item["title"] + " " + item["summary"])
-        image_url = await get_unsplash_image(query)
+    # Добавляем источник и ссылку
+    source_line = f"\n\n📰 <a href='{item['link']}'>{item['source']}</a>"
+    full_text = post_text + source_line
 
-    await send_telegram(post_text, image_url)
+    # Фото: сначала из RSS, потом Unsplash
+    images = item["images"]
+    if not images:
+        print("No RSS images, trying Unsplash...")
+        query = get_unsplash_query(item["title"] + " " + item["summary"])
+        fallback = await get_unsplash_image(query)
+        if fallback:
+            images = [fallback]
+
+    await send_telegram_album(full_text, images)
 
     posted = load_posted()
     posted.add(item["id"])
